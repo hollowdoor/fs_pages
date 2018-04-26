@@ -16,7 +16,8 @@ const cwd = process.cwd();
 export class Page {
     constructor(filepath, {
         load = (s)=>s,
-        output = (c)=>c
+        output = (c)=>c,
+        streamMedia = true
     } = {}){
         this.filepath = filepath;
         this.mimetype = mime.lookup(filepath);
@@ -24,23 +25,37 @@ export class Page {
         this.dirname = path.dirname(filepath);
         this.pending = Promise.resolve(this);
 
+        this.streamMedia = streamMedia;
         this._load = load;
         this._output = output;
+    }
+    write(content = ''){
+        return makeDir(this.dirname)
+        .then(()=>{
+            return writeFile(
+                this.filepath,
+                content
+            ).then(()=>{
+                return this.content = content;
+            });
+        });
+    }
+    stream(){
+        return fs.createReadStream(this.filename);
     }
     load(){
         this.pending = stat(this.filepath)
         .then(stats=>{
             this.stats = stats;
             return readFile(this.filepath, 'utf8');
-        }).then(source=>{
-            this.source = source;
-            this.content = this._load(source);
+        }).then(content=>{
+            this.content = this._load(content);
             return this;
         });
         return this.pending;
     }
     streamTo(filename, {toPromise = true} = {}){
-        let rs = fs.createReadStream(this.filename);
+        let rs = this.stream();
         let ws = fs.createWriteStream(filename);
         let pipe = rs.pipe(ws);
         if(!toPromise) return pipe;
@@ -51,34 +66,29 @@ export class Page {
         });
     }
     output(filename, {
-        autoTransfer = true,
+        streamMedia,
         load,
         output
     } = {}){
 
-        if(autoTransfer && /^image|^video/.test(this.mimetype)){
-            return this.streamTo(filename);
-        }
-
-        let dirname = path.dirname(filename);
-        let making = makeDir(dirname);
-
-        return Promise.all([
-            this.pending,
-            making
-        ])
-        .then(p=>{
-            this.content = this._output(this.content);
-
-            return writeFile(
-                filename,
-                this.content
-            ).then(v=>{
-                return new Page(filename, {
-                    load,
-                    output
-                }).load();
+        return this.pending.then(p=>{
+            let page = new Page(filename, {
+                load,
+                output,
+                streamMedia: streamMedia !== void 0
+                ? !!streamMedia
+                : this.streamMedia
             });
+
+            if(this.streamMedia && /^image|^video/.test(this.mimetype)){
+                return this.streamTo(filename)
+                .then(p=>page);
+            }
+
+            let content = this._output(this.content);
+
+            return page.write(content)
+            .then(()=>page);
         });
     }
     toDirectory(dir, {
