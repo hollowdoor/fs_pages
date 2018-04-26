@@ -36,14 +36,21 @@ export class Page {
                 this.filepath,
                 content
             ).then(()=>{
-                return this.content = content;
+                return (this.content = content);
             });
         });
     }
+    copy(filename, options){
+        return this.streamTo(filename)
+        .then(()=>this.to(filename, options));
+    }
     stream(){
-        return fs.createReadStream(this.filename);
+        return fs.createReadStream(this.filepath);
     }
     load(){
+        if(this.streamMedia && /^image|^video/.test(this.mimetype)){
+            return Promise.resolve(this);
+        }
         this.pending = stat(this.filepath)
         .then(stats=>{
             this.stats = stats;
@@ -65,6 +72,27 @@ export class Page {
             ws.on('finish', resolve);
         });
     }
+    to(source, {
+        streamMedia,
+        load,
+        output
+    } = {}){
+        if(source instanceof Page){
+            source.content = this.content;
+            source.streamMedia = streamMedia;
+            source._load = load;
+            source._output = output;
+            return source;
+        }
+
+        return this.to(
+            new Page(source), {
+                streamMedia,
+                load,
+                output
+            }
+        );
+    }
     output(filename, {
         streamMedia,
         load,
@@ -72,7 +100,17 @@ export class Page {
     } = {}){
 
         return this.pending.then(p=>{
-            let page = new Page(filename, {
+            console.log('filename ',filename)
+            if(this.streamMedia && /^image|^video/.test(this.mimetype)){
+                return this.copy(filename, {
+                    streamMedia,
+                    load,
+                    output
+                });
+            }
+
+            let content = this._output(this.content);
+            let page = this.to(filename, {
                 load,
                 output,
                 streamMedia: streamMedia !== void 0
@@ -80,12 +118,6 @@ export class Page {
                 : this.streamMedia
             });
 
-            if(this.streamMedia && /^image|^video/.test(this.mimetype)){
-                return this.streamTo(filename)
-                .then(p=>page);
-            }
-
-            let content = this._output(this.content);
 
             return page.write(content)
             .then(()=>page);
