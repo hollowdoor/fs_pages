@@ -1,0 +1,39 @@
+{
+  "name": "fs-pages",
+  "version": "1.0.0",
+  "description": "File system control",
+  "main": "index.js",
+  "scripts": {
+    "build": "rollup -c",
+    "test": "npm run build && ava test/*.js -v"
+  },
+  "keywords": [
+    "pages",
+    "fs",
+    "input",
+    "output"
+  ],
+  "author": "Quentin Engles <hollowdoor99@gmail.com> (https://hollowdoor.github.io/)",
+  "license": "MIT",
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "del": "^3.0.0",
+    "globby": "^8.0.1",
+    "make-dir": "^1.2.0",
+    "mime-types": "^2.1.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hollowdoor/page_classes.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hollowdoor/page_classes/issues"
+  },
+  "homepage": "https://github.com/hollowdoor/page_classes#readme",
+  "devDependencies": {
+    "ava": "^0.25.0"
+  },
+  "directories": {
+    "test": "test"
+  }
+}
