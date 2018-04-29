@@ -20,7 +20,8 @@
     "del": "^3.0.0",
     "globby": "^8.0.1",
     "make-dir": "^1.2.0",
-    "mime-types": "^2.1.18"
+    "mime-types": "^2.1.18",
+    "tempy": "^0.2.1"
   },
   "repository": {
     "type": "git",
