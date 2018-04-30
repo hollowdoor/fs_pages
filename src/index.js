@@ -1,97 +1,37 @@
-import fs from 'fs';
-import Promise from 'bluebird';
 import path from 'path';
-import mime from 'mime-types';
-import globby from 'globby';
-import makeDir from 'make-dir';
-import del from 'del';
-const p = Promise.promisify;
-const readdir = p(fs.readdir);
-const readFile = p(fs.readFile);
-const writeFile = p(fs.writeFile);
-const unlink = p(fs.unlink);
-const stat = p(fs.stat);
-const cwd = process.cwd();
+import { File, Directory } from './lib/fs_class.js';
 
-export class Page {
-    constructor(filepath, {
+export class Page extends File {
+    constructor(pathname, {
         load = (s)=>s,
         output = (c)=>c,
         streamMedia = true
     } = {}){
-        this.filepath = filepath;
-        this.mimetype = mime.lookup(filepath);
-        this.filename = path.basename(filepath);
-        this.dirname = path.dirname(filepath);
-        this.pending = Promise.resolve(this);
-
+        super(pathname);
         this.streamMedia = streamMedia;
+        this.loading = Promise.resolve();
         this._load = load;
         this._output = output;
     }
-    write(content = ''){
-        return makeDir(this.dirname)
-        .then(()=>{
-            return writeFile(
-                this.filepath,
-                content
-            ).then(()=>{
-                return (this.content = content);
-            });
-        });
-    }
     copy(filename, options){
-        return this.streamTo(filename)
-        .then(()=>this.to(filename, options));
-    }
-    stream(){
-        return fs.createReadStream(this.filepath);
+        return super.copy(filename)
+        .then(()=>{
+            return new Page(filename, options);
+        });
     }
     load(){
         if(this.streamMedia && /^image|^video/.test(this.mimetype)){
             return Promise.resolve(this);
         }
-        this.pending = stat(this.filepath)
-        .then(stats=>{
-            this.stats = stats;
-            return readFile(this.filepath, 'utf8');
-        }).then(content=>{
-            this.content = this._load(content);
-            return this;
-        });
-        return this.pending;
-    }
-    streamTo(filename, {toPromise = true} = {}){
-        let rs = this.stream();
-        let ws = fs.createWriteStream(filename);
-        let pipe = rs.pipe(ws);
-        if(!toPromise) return pipe;
-        return new Promise((resolve, reject)=>{
-            rs.on('error', reject);
-            ws.on('error', reject);
-            ws.on('finish', resolve);
-        });
-    }
-    to(source, {
-        streamMedia,
-        load,
-        output
-    } = {}){
-        if(source instanceof Page){
-            source.content = this.content;
-            source.streamMedia = streamMedia;
-            source._load = load;
-            source._output = output;
-            return source;
-        }
 
-        return this.to(
-            new Page(source), {
-                streamMedia,
-                load,
-                output
-            }
-        );
+        this.loading = Promise.all([
+            this.stat(),
+            this.read()
+        ]).then(([stats, content])=>{
+            this.stats = stats;
+            return (this.content = this._load(content));
+        });
+        return this.loading;
     }
     output(filename, {
         streamMedia,
@@ -99,8 +39,11 @@ export class Page {
         output
     } = {}){
 
-        return this.pending.then(p=>{
-            console.log('filename ',filename)
+        streamMedia = streamMedia !== void 0
+        ? !!streamMedia
+        : this.streamMedia;
+
+        return this.loading.then(p=>{
             if(this.streamMedia && /^image|^video/.test(this.mimetype)){
                 return this.copy(filename, {
                     streamMedia,
@@ -109,58 +52,42 @@ export class Page {
                 });
             }
 
-            let content = this._output(this.content);
-            let page = this.to(filename, {
+            let page = new Page(filename, {
+                streamMedia,
                 load,
-                output,
-                streamMedia: streamMedia !== void 0
-                ? !!streamMedia
-                : this.streamMedia
+                output
             });
 
+            let content = this._output(this.content);
 
             return page.write(content)
-            .then(()=>page);
+            .then(()=>{
+                this.emit('after-output', page);
+                return page;
+            });
         });
     }
     toDirectory(dir, {
         load, output, autoTransfer
     } = {}){
         return this.output(
-            path.join(dir, this.filename),
+            path.join(dir, this.name),
             {load, output, autoTransfer}
         );
     }
-    delete({parent = false} = {}){
-        let p = parent
-        ? del([this.dirname])
-        : Promise.resolve();
-
-        return p.then(()=>{
-            return del([this.filepath])
-            .catch(e=>{
-                return Promise.resolve([this.filepath]);
-            });
-        });
-    }
 }
 
-
-export class Pages {
-    constructor({
-        globs = null,
+export class Pages extends Directory {
+    constructor(dir, {
         pages = [],
-        cwd = process.cwd(),
         load = (s)=>s,
         output = (c)=>c,
         loadAll = (p)=>p,
         beforeOutput = (p)=>p,
         afterOutput = (p)=>p
     } = {}){
-        this.cwd = cwd;
+        super(dir);
         this.pages = pages;
-
-        this.globs = globs;
         this.pending = Promise.resolve(this.pages);
         this._load = load;
         this._output = output;
@@ -170,30 +97,38 @@ export class Pages {
     get length(){
         return this.pages.length;
     }
-    load({
-        globOptions = {}
-    } = {}){
+    load(globs, options = {}){
 
-        globOptions.cwd = globOptions.cwd || this.cwd;
+        let loading;
 
-        this.pending = globby(this.globs, globOptions)
+        options.cwd = this.pathname;
+
+        if(globs === void 0){
+            loading = this.read();
+        }else{
+            loading = this.glob(globs, options);
+        }
+
+        this.pending = loading
         .then(files=>{
 
             return Promise.all(files
             .map((file, i)=>{
                 let filepath = path.join(
-                    this.cwd,
+                    this.pathname,
                     file
                 );
 
-                return new Page(filepath, {
+                let page = new Page(filepath, {
                     load:this._load,
                     output:this._output
-                }).load();
+                })
+
+                return page.load().then(()=>page);
             }));
         }).then(pages=>{
             this.pages = this._loadAll(pages);
-            return this.pages;
+            return this;
         });
 
         return this.pending;
@@ -209,23 +144,26 @@ export class Pages {
         }
 
         return this.pending.then(pages=>{
-            //this.pages = this._outputAll(pages);
             let writing = this.pages.map(page=>{
                 return page.toDirectory(dir, {autoTransfer, load, output});
             });
 
             return Promise.all(writing)
             .then(pages=>{
-                return this._afterOutput(pages);
+                return this._afterOutput(new Pages(dir));
             });
         });
     }
-    delete(options){
-        let del = this.pages.map(page=>{
-            return page.delete(options);
+    /*delete(files, options){
+        return super.delete(files, options)
+        .then((deleted)=>{
+            console.log('deleted ',deleted)
+            let pages = [];
+            for(let i=0; i<deleted.length; i++){
+                if(deleted)
+            }
         });
-        return Promise.all(del);
-    }
+    }*/
     [Symbol.iterator](){
         let i = -1;
         let pages = this.pages;
@@ -242,6 +180,8 @@ export class Pages {
         };
     }
 }
+
+
 
 export class Pager {
     constructor({

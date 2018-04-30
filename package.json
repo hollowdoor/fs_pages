@@ -17,10 +17,12 @@
   "license": "MIT",
   "dependencies": {
     "bluebird": "^3.5.1",
+    "copy-concurrently": "^1.0.5",
     "del": "^3.0.0",
     "globby": "^8.0.1",
     "make-dir": "^1.2.0",
     "mime-types": "^2.1.18",
+    "move-concurrently": "^1.0.1",
     "tempy": "^0.2.1"
   },
   "repository": {

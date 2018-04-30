@@ -21,25 +21,11 @@ const concurrent = os.cpus() || 1;
 
 class FileOrg extends EventEmitter {
     constructor(pathname){
+        super();
         this.pathname = pathname;
         this.dirname = path.dirname(pathname);
         this.name = path.basename(pathname);
         this.__resultClass = this.constructor;
-    }
-    delete({parent = false} = {}){
-        return p.then(()=>{
-            return del([this.pathname])
-            .catch(e=>{
-                return Promise.resolve([this.pathname]);
-            });
-        }).then(()=>{
-            return parent
-            ? del([this.dirname])
-            : this.dirname;
-        }).then(res=>{
-            this.emit('delete');
-            return res;
-        });
     }
     stat(){
         return stat(this.pathname);
@@ -50,7 +36,7 @@ class FileOrg extends EventEmitter {
         }).then(()=>{
             let C = this.__resultClass;
             let i = new C(destination, options);
-            this.emit('copy', i);
+            this.emit('copied', i);
             return i;
         });
     }
@@ -60,7 +46,7 @@ class FileOrg extends EventEmitter {
         }).then(()=>{
             let C = this.__resultClass;
             let i = new C(destination, options);
-            this.emit('move', i);
+            this.emit('moved', i);
             return i;
         });
     }
@@ -71,7 +57,7 @@ export class File extends FileOrg {
         super(pathname);
         this.mimetype = mime.lookup(pathname);
     }
-    read(options, options = 'utf8'){
+    read(options = 'utf8'){
         return readFile(this.pathname, options)
         .then(content=>{
             this.emit('read', content);
@@ -86,16 +72,27 @@ export class File extends FileOrg {
             );
         })
         .then(content=>{
-            this.emit('write', content);
+            this.emit('written', content);
             return content;
         });
     }
     readStream(){
-        return fs.createReadStream(this.pathname);
+        let s = fs.createReadStream(this.pathname);
+        this.emit('read-stream', s);
+        return this;
     }
     writeStream(){
         makeDir.sync(this.dirname);
-        return fs.createWriteStream(this.pathname);
+        let s = fs.createWriteStream(this.pathname);
+        this.emit('write-stream', s);
+        return this;
+    }
+    delete(options){
+        return del([this.pathname])
+        .then(res=>{
+            this.emit('delete', res);
+            return res;
+        });
     }
 }
 
@@ -107,22 +104,22 @@ export class Directory extends FileOrg {
         options.cwd = this.pathname;
         return globby(globs, options)
         .then(dirs=>{
-            this.emit('glob', dirs);
+            this.emit('globbed', dirs);
             return dirs;
         });
     }
-    read(){
-        return readdir(this.pathname)
-        .then(dirs=>{
-            this.emit('read', dirs);
-            return dirs;
+    read(options){
+        return readdir(this.pathname, options)
+        .then(files=>{
+            this.emit('read', files);
+            return files;
         });
     }
     readStream(){
         //https://github.com/nodejs/node/issues/583
         let dirs = this.read();
         let index = -1;
-        return new Readable({
+        let s = new Readable({
             read(){
                 if(++index < dirs.length){
                     this.push(dirs[index]);
@@ -130,6 +127,37 @@ export class Directory extends FileOrg {
                     this.push(null);
                 }
             }
+        });
+
+        this.emit('read-stream', s);
+        return s;
+    }
+    delete(files = null, options = {}){
+
+        if(files === null){
+            return del([this.pathname], options)
+            .then(res=>{
+                this.emit('deleted', res);
+            });
+        }
+
+        if(typeof files === 'string'){
+            files = [files];
+        }
+
+        if(Array.isArray(files)){
+            files = files.map(file=>{
+                return path.join(this.pathname, file);
+            });
+        }
+
+
+        //console.log('files ',files)
+
+        return del(files, options)
+        .then(res=>{
+            this.emit('deleted', res);
+            return res;
         });
     }
 }
